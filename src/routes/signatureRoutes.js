@@ -1,30 +1,35 @@
-    const express = require('express');
-const router = express.Router();
+const express = require('express');
+const router  = express.Router();
 const { protect } = require('../middleware/authMiddleware');
 const {
   createSignature,
   getDocumentSignatures,
   updateSignaturePosition,
+  updateSignatureStatus,
   deleteSignature,
-  updateSignatureStatus
 } = require('../controllers/signatureController');
+const {
+  sendSigningLink,
+  getPublicSigningRequest,
+  submitPublicSignature,
+} = require('../controllers/publicSignController');
 
-// All routes are protected
+// ── PUBLIC ROUTES — no JWT needed ─────────────────────────────────
+// Must be defined BEFORE router.use(protect)
+router.get('/public/:token',      getPublicSigningRequest);
+router.post('/public/:token/sign', submitPublicSignature);
+
+// ── All routes below require auth ─────────────────────────────────
 router.use(protect);
 
-// Create new signature
-router.post('/', createSignature);
+// ── Send signing link (owner only) ────────────────────────────────
+router.post('/:id/send-link', sendSigningLink);
 
-// Get signatures for a document
-router.get('/document/:documentId', getDocumentSignatures);
-
-// Update signature position
-router.put('/:id/position', updateSignaturePosition);
-
-// Update signature status
-router.patch('/:id/status', updateSignatureStatus);
-
-// Delete signature
-router.delete('/:id', deleteSignature);
+// ── Standard signature CRUD ───────────────────────────────────────
+router.post('/',                           createSignature);
+router.get('/document/:documentId',        getDocumentSignatures);
+router.put('/:id/position',                updateSignaturePosition);
+router.patch('/:id/status',                updateSignatureStatus);
+router.delete('/:id',                      deleteSignature);
 
 module.exports = router;
