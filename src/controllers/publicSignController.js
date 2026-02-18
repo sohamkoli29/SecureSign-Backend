@@ -105,7 +105,7 @@ const sendSigningLink = async (req, res) => {
     if (signer_email?.trim()) {
       const transporter = getTransporter();
       await transporter.sendMail({
-        from:    process.env.GMAIL_USER || 'noreply@docsign.app',
+        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
         to:      signer_email.trim(),
         subject: `You've been asked to sign: ${docTitle}`,
         text: [
@@ -118,12 +118,12 @@ const sendSigningLink = async (req, res) => {
           '',
           `This link expires on ${expiresAt.toLocaleDateString()}.`,
           '',
-          'DocSign',
+          'SecureSign',
         ].join('\n'),
         html: `
           <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
             <div style="background:#1e3a5f;padding:20px 24px;border-radius:8px;margin-bottom:24px">
-              <h1 style="color:#fff;margin:0;font-size:20px">📄 DocSign</h1>
+              <h1 style="color:#fff;margin:0;font-size:20px">📄 SecureSign</h1>
             </div>
             <h2 style="color:#111;font-size:18px;margin:0 0 8px">Signature Requested</h2>
             <p style="color:#555;margin:0 0 24px">Hi <strong>${signer_name}</strong>, you have been asked to sign:</p>
@@ -322,8 +322,154 @@ const submitPublicSignature = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/signatures/public/:token/reject
+ * NO auth required
+ *
+ * Body: { rejection_reason }
+ * Marks signature as rejected by the signer, notifies document owner via email
+ */
+const submitPublicRejection = async (req, res) => {
+  try {
+    const { token }            = req.params;
+    const { rejection_reason } = req.body;
+
+    if (!rejection_reason?.trim()) {
+      return res.status(400).json({ success: false, error: 'rejection_reason is required' });
+    }
+
+    /* ── Look up token ───────────────────────────────────────────── */
+    const { data: sig, error } = await supabaseAdmin
+      .from('signatures')
+      .select('id, status, document_id, signer_name, signer_email, token_expires_at')
+      .eq('signing_token', token)
+      .single();
+
+    if (error || !sig) {
+      return res.status(404).json({ success: false, error: 'Invalid signing link' });
+    }
+
+    if (new Date(sig.token_expires_at) < new Date()) {
+      return res.status(410).json({ success: false, error: 'This signing link has expired' });
+    }
+
+    if (sig.status === 'signed') {
+      return res.status(400).json({ success: false, error: 'Already signed' });
+    }
+
+    if (sig.status === 'rejected') {
+      return res.status(400).json({ success: false, error: 'Already rejected' });
+    }
+
+    /* ── Mark as rejected, clear token ──────────────────────────── */
+    const { error: updateErr } = await supabaseAdmin
+      .from('signatures')
+      .update({
+        status:           'rejected',
+        rejection_reason: rejection_reason.trim(),
+        signing_token:    null,
+        token_expires_at: null,
+        signer_ip:        req.ip,
+        updated_at:       new Date().toISOString(),
+      })
+      .eq('id', sig.id);
+
+    if (updateErr) {
+      console.error('submitPublicRejection update error:', updateErr);
+      return res.status(500).json({ success: false, error: 'Failed to save rejection' });
+    }
+
+    /* ── Fetch document to get owner email ──────────────────────── */
+    const { data: doc, error: docErr } = await supabaseAdmin
+      .from('documents')
+      .select('id, title, file_name, user_id, users(email, full_name)')
+      .eq('id', sig.document_id)
+      .single();
+
+    if (docErr || !doc) {
+      console.error('Failed to fetch document for rejection email:', docErr);
+      // Still return success to signer — rejection was saved
+      return res.json({ success: true, message: 'Signature rejected' });
+    }
+
+    /* ── Send rejection notification email to document owner ────── */
+    const ownerEmail = doc.users?.email;
+    const ownerName  = doc.users?.full_name || 'Document Owner';
+    const docTitle   = doc.title || doc.file_name || 'Document';
+
+    if (ownerEmail) {
+      const transporter = getTransporter();
+
+      await transporter.sendMail({
+        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
+        to:      ownerEmail,
+        subject: `Signature Rejected: ${docTitle}`,
+        text: [
+          `Hi ${ownerName},`,
+          '',
+          `${sig.signer_name} has rejected the signing request for "${docTitle}".`,
+          '',
+          `Reason: ${rejection_reason.trim()}`,
+          '',
+          'Please review the rejection and contact the signer if needed.',
+          '',
+          'SecureSign',
+        ].join('\n'),
+        html: `
+          <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
+            <div style="background:#dc2626;padding:20px 24px;border-radius:8px;margin-bottom:24px">
+              <h1 style="color:#fff;margin:0;font-size:20px">❌ Signature Rejected</h1>
+            </div>
+            <p style="color:#111;margin:0 0 8px">Hi <strong>${ownerName}</strong>,</p>
+            <p style="color:#555;margin:0 0 24px">
+              <strong>${sig.signer_name}</strong> has rejected the signing request for <strong>"${docTitle}"</strong>.
+            </p>
+            <div style="background:#fee;border:1px solid #fcc;border-radius:8px;padding:16px;margin-bottom:24px">
+              <p style="color:#991;font-weight:600;margin:0 0 8px;font-size:13px">REJECTION REASON:</p>
+              <p style="color:#555;margin:0;font-style:italic">"${rejection_reason.trim()}"</p>
+            </div>
+            <p style="color:#555;margin:0">
+              Please review the rejection and contact <strong>${sig.signer_name}</strong> ${sig.signer_email ? `(${sig.signer_email})` : ''} if needed.
+            </p>
+            <p style="color:#9ca3af;font-size:12px;margin-top:32px;border-top:1px solid #e5e7eb;padding-top:16px">
+              This is an automated notification from SecureSign.
+            </p>
+          </div>`,
+      });
+
+      console.log(`✅ Rejection notification sent to ${ownerEmail}`);
+    }
+
+    /* ── Audit log ───────────────────────────────────────────────── */
+    await supabaseAdmin.from('audit_logs').insert([{
+      user_id:     null,
+      document_id: sig.document_id,
+      action:      'PUBLIC_SIGNATURE_REJECTED',
+      details: {
+        signature_id:     sig.id,
+        signer_name:      sig.signer_name,
+        rejection_reason: rejection_reason.trim(),
+        email_sent:       !!ownerEmail,
+      },
+      ip_address: req.ip,
+      user_agent: req.get('user-agent'),
+    }]);
+
+    res.json({
+      success:     true,
+      message:     'Signature rejected',
+      signer_name: sig.signer_name,
+    });
+
+  } catch (err) {
+    console.error('submitPublicRejection error:', err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+};
+
 module.exports = {
   sendSigningLink,
   getPublicSigningRequest,
   submitPublicSignature,
+  submitPublicRejection,
 };

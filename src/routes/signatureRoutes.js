@@ -12,12 +12,14 @@ const {
   sendSigningLink,
   getPublicSigningRequest,
   submitPublicSignature,
+  submitPublicRejection,
 } = require('../controllers/publicSignController');
 
 // ── PUBLIC ROUTES — no JWT needed ─────────────────────────────────
 // Must be defined BEFORE router.use(protect)
-router.get('/public/:token',      getPublicSigningRequest);
-router.post('/public/:token/sign', submitPublicSignature);
+router.get('/public/:token',        getPublicSigningRequest);
+router.post('/public/:token/sign',  submitPublicSignature);
+router.post('/public/:token/reject', submitPublicRejection);
 
 // ── All routes below require auth ─────────────────────────────────
 router.use(protect);
