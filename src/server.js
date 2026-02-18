@@ -12,7 +12,7 @@ const app = express();
 const authRoutes = require('./routes/authRoutes');
 const documentRoutes = require('./routes/documentRoutes');
 const signatureRoutes = require('./routes/signatureRoutes'); // Add this
-
+const auditRoutes = require('./routes/auditRoutes');
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -31,7 +31,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/signatures', signatureRoutes); // Add this
-
+app.use('/api/audit', auditRoutes);
 // Basic route for testing
 app.get('/api/health', (req, res) => {
   res.json({ 
