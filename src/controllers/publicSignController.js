@@ -123,7 +123,12 @@ const sendSigningLink = async (req, res) => {
         html: `
           <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
             <div style="background:#1e3a5f;padding:20px 24px;border-radius:8px;margin-bottom:24px">
-              <h1 style="color:#fff;margin:0;font-size:20px">📄 SecureSign</h1>
+              <h1 style="color:#fff;margin:0;font-size:20px"><img 
+  src="${process.env.LOGO_URL}"
+  alt="SecureSign"
+  style="height:32px; display:block;"
+/>
+ SecureSign</h1>
             </div>
             <h2 style="color:#111;font-size:18px;margin:0 0 8px">Signature Requested</h2>
             <p style="color:#555;margin:0 0 24px">Hi <strong>${signer_name}</strong>, you have been asked to sign:</p>
