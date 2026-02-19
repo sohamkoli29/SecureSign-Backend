@@ -106,7 +106,7 @@ const sendSigningLink = async (req, res) => {
     if (signer_email?.trim()) {
       const transporter = getTransporter();
       await transporter.sendMail({
-        from:    process.env.GMAIL_USER || 'noreply@docsign.app',
+        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
         to:      signer_email.trim(),
         subject: `You've been asked to sign: ${docTitle}`,
         text: [
@@ -119,12 +119,17 @@ const sendSigningLink = async (req, res) => {
           '',
           `This link expires on ${expiresAt.toLocaleDateString()}.`,
           '',
-          'DocSign',
+          'SecureSign',
         ].join('\n'),
         html: `
           <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
             <div style="background:#1e3a5f;padding:20px 24px;border-radius:8px;margin-bottom:24px">
-              <h1 style="color:#fff;margin:0;font-size:20px">📄 DocSign</h1>
+              <h1 style="color:#fff;margin:0;font-size:20px"><img 
+  src="${process.env.LOGO_URL}"
+  alt="SecureSign"
+  style="height:32px; display:block;"
+/>
+ SecureSign</h1>
             </div>
             <h2 style="color:#111;font-size:18px;margin:0 0 8px">Signature Requested</h2>
             <p style="color:#555;margin:0 0 24px">Hi <strong>${signer_name}</strong>, you have been asked to sign:</p>
@@ -402,7 +407,7 @@ const submitPublicRejection = async (req, res) => {
       const transporter = getTransporter();
 
       await transporter.sendMail({
-        from:    process.env.GMAIL_USER || 'noreply@docsign.app',
+        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
         to:      ownerEmail,
         subject: `Signature Rejected: ${docTitle}`,
         text: [
@@ -414,7 +419,7 @@ const submitPublicRejection = async (req, res) => {
           '',
           'Please review the rejection and contact the signer if needed.',
           '',
-          'DocSign',
+          'SecureSign',
         ].join('\n'),
         html: `
           <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
@@ -433,7 +438,7 @@ const submitPublicRejection = async (req, res) => {
               Please review the rejection and contact <strong>${sig.signer_name}</strong> ${sig.signer_email ? `(${sig.signer_email})` : ''} if needed.
             </p>
             <p style="color:#9ca3af;font-size:12px;margin-top:32px;border-top:1px solid #e5e7eb;padding-top:16px">
-              This is an automated notification from DocSign.
+              This is an automated notification from SecureSign.
             </p>
           </div>`,
       });
