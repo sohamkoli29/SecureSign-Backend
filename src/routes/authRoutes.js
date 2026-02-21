@@ -7,6 +7,7 @@ const {
   getMe,
   logoutUser
 } = require('../controllers/authController');
+const googleAuthController = require('../controllers/googleAuthController');
 const { protect } = require('../middleware/authMiddleware');
 
 // Public routes
@@ -17,5 +18,6 @@ router.post('/refresh-token', refreshToken);
 // Protected routes
 router.get('/me', protect, getMe);
 router.post('/logout', protect, logoutUser);
-
+router.post('/google-callback', googleAuthController.handleGoogleCallback);
 module.exports = router;
+
