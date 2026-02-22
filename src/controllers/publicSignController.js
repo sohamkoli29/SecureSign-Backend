@@ -1,41 +1,28 @@
 const supabaseAdmin = require('../utils/supabaseAdmin');
-const nodemailer    = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
+const { Resend } = require('resend');
 
-/* ── Email transporter ───────────────────────────────────────────── */
-const getTransporter = () => {
-  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
+const sendEmail = async ({ to, subject, text, html }) => {
+  if (!process.env.RESEND_API_KEY) {
+    console.log('\n📧 ── MOCK EMAIL ──────────────────────────────');
+    console.log(`  To:      ${to}`);
+    console.log(`  Subject: ${subject}`);
+    console.log('─────────────────────────────────────────────\n');
+    return;
   }
-
-  // Mock transporter for development
-  return {
-    sendMail: async (opts) => {
-      console.log('\n📧 ── MOCK EMAIL ──────────────────────────────');
-      console.log(`  To:      ${opts.to}`);
-      console.log(`  Subject: ${opts.subject}`);
-      console.log('─────────────────────────────────────────────\n');
-      return { messageId: 'mock-' + Date.now() };
-    },
-  };
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  await resend.emails.send({
+    from: process.env.FROM_EMAIL || 'SecureSign <onboarding@resend.dev>',
+    to,
+    subject,
+    text,
+    html,
+  });
 };
 
-/**
- * POST /api/signatures/:id/send-link
- * Auth required (document owner only)
- *
- * Body: { signer_name, signer_email }
- * Generates signing token, sends email notification
- */
 const sendSigningLink = async (req, res) => {
   try {
-    const { id }                       = req.params;
+    const { id }                        = req.params;
     const { signer_name, signer_email } = req.body;
     const userId                        = req.user.id;
 
@@ -43,7 +30,6 @@ const sendSigningLink = async (req, res) => {
       return res.status(400).json({ success: false, error: 'signer_name is required' });
     }
 
-    /* ── Verify signature exists ─────────────────────────────────────── */
     const { data: sig, error: sigErr } = await supabaseAdmin
       .from('signatures')
       .select('id, document_id, status, signer_name, signer_email')
@@ -54,7 +40,6 @@ const sendSigningLink = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Signature not found' });
     }
 
-    /* ── Verify the document is owned by this user ───────────────────── */
     const { data: doc, error: docErr } = await supabaseAdmin
       .from('documents')
       .select('id, title, user_id, file_url')
@@ -73,9 +58,8 @@ const sendSigningLink = async (req, res) => {
       return res.status(400).json({ success: false, error: 'This signature has already been signed' });
     }
 
-    /* ── Generate token ──────────────────────────────────────────────── */
-    const token      = uuidv4();
-    const expiresAt  = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    const token     = uuidv4();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const { error: updateErr } = await supabaseAdmin
       .from('signatures')
@@ -84,7 +68,7 @@ const sendSigningLink = async (req, res) => {
         token_expires_at: expiresAt.toISOString(),
         signer_name:      signer_name.trim(),
         signer_email:     signer_email?.trim() || null,
-        link_sent:        true,  // lock position after sending
+        link_sent:        true,
         updated_at:       new Date().toISOString(),
       })
       .eq('id', id);
@@ -94,15 +78,11 @@ const sendSigningLink = async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to generate signing link' });
     }
 
-    const docTitle = doc.title || 'Document';
+    const docTitle  = doc.title || 'Document';
     const publicUrl = `${process.env.FRONTEND_URL}/sign/public/${token}`;
 
-    /* ── Send email if email provided ────────────────────────────────── */
     if (signer_email?.trim()) {
-      const transporter = getTransporter();
-
-      await transporter.sendMail({
-        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
+      await sendEmail({
         to:      signer_email.trim(),
         subject: `Please sign: ${docTitle}`,
         text: [
@@ -120,12 +100,7 @@ const sendSigningLink = async (req, res) => {
         html: `
           <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
             <div style="background:#2563eb;padding:20px 24px;border-radius:8px;margin-bottom:24px">
-              <h1 style="color:#fff;margin:0;font-size:20px"><img 
-  src="${process.env.LOGO_URL}"
-  alt="SecureSign"
-  style="height:32px; display:block;"
-/>
- Signature Request</h1>
+              <h1 style="color:#fff;margin:0;font-size:20px">Signature Request</h1>
             </div>
             <p style="color:#111;margin:0 0 8px">Hi <strong>${signer_name}</strong>,</p>
             <p style="color:#555;margin:0 0 24px">
@@ -149,7 +124,6 @@ const sendSigningLink = async (req, res) => {
       console.log(`✅ Signing link sent to ${signer_email}`);
     }
 
-    /* ── Audit log ───────────────────────────────────────────────────── */
     await supabaseAdmin.from('audit_logs').insert([{
       user_id:     userId,
       document_id: sig.document_id,
@@ -176,10 +150,6 @@ const sendSigningLink = async (req, res) => {
   }
 };
 
-/**
- * GET /api/signatures/public/:token
- * NO auth required
- */
 const getPublicSigningRequest = async (req, res) => {
   try {
     const { token } = req.params;
@@ -207,7 +177,6 @@ const getPublicSigningRequest = async (req, res) => {
       });
     }
 
-    // Fetch document separately
     const { data: doc, error: docErr } = await supabaseAdmin
       .from('documents')
       .select('id, title, file_url, file_name')
@@ -242,14 +211,6 @@ const getPublicSigningRequest = async (req, res) => {
   }
 };
 
-/**
- * POST /api/signatures/public/:token/sign
- * NO auth required
- *
- * 1. Marks signature as signed
- * 2. Checks if all signatures signed → auto-finalize PDF
- * 3. Emails signed PDF to signer
- */
 const submitPublicSignature = async (req, res) => {
   try {
     const { token }          = req.params;
@@ -259,7 +220,6 @@ const submitPublicSignature = async (req, res) => {
       return res.status(400).json({ success: false, error: 'signature_data is required' });
     }
 
-    /* ── Look up token ───────────────────────────────────────────────── */
     const { data: sig, error } = await supabaseAdmin
       .from('signatures')
       .select('id, status, document_id, signer_name, signer_email, token_expires_at')
@@ -278,7 +238,6 @@ const submitPublicSignature = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Already signed' });
     }
 
-    /* ── Mark as signed ──────────────────────────────────────────────── */
     const { error: updateErr } = await supabaseAdmin
       .from('signatures')
       .update({
@@ -297,7 +256,6 @@ const submitPublicSignature = async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to save signature' });
     }
 
-    /* ── Check if all signed → auto-finalize ─────────────────────────── */
     const { data: allSigs } = await supabaseAdmin
       .from('signatures')
       .select('id, status')
@@ -380,10 +338,7 @@ const submitPublicSignature = async (req, res) => {
       }
     }
 
-    /* ── Email signed PDF to signer ──────────────────────────────────── */
     if (signedPdfUrl && sig.signer_email) {
-      const transporter = getTransporter();
-
       const { data: doc } = await supabaseAdmin
         .from('documents')
         .select('title, file_name')
@@ -392,9 +347,8 @@ const submitPublicSignature = async (req, res) => {
 
       const docTitle = doc?.title || doc?.file_name || 'Document';
 
-      await transporter.sendMail({
-        from: process.env.GMAIL_USER || 'noreply@SecureSign.app',
-        to: sig.signer_email,
+      await sendEmail({
+        to:      sig.signer_email,
         subject: `Signed: ${docTitle}`,
         text: [
           `Hi ${sig.signer_name},`,
@@ -408,12 +362,7 @@ const submitPublicSignature = async (req, res) => {
         html: `
           <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:12px">
             <div style="background:#10b981;padding:20px 24px;border-radius:8px;margin-bottom:24px">
-              <h1 style="color:#fff;margin:0;font-size:20px"> <img 
-  src="${process.env.LOGO_URL}"
-  alt="SecureSign"
-  style="height:32px; display:block;"
-/>
- Document Signed</h1>
+              <h1 style="color:#fff;margin:0;font-size:20px">Document Signed</h1>
             </div>
             <p style="color:#111;margin:0 0 16px">Hi <strong>${sig.signer_name}</strong>,</p>
             <p style="color:#555;margin:0 0 24px">Thank you for signing <strong>"${docTitle}"</strong>.</p>
@@ -431,26 +380,25 @@ const submitPublicSignature = async (req, res) => {
       console.log(`✅ Signed PDF emailed to ${sig.signer_email}`);
     }
 
-    /* ── Audit log ───────────────────────────────────────────────────── */
     await supabaseAdmin.from('audit_logs').insert([{
-      user_id: null,
+      user_id:     null,
       document_id: sig.document_id,
-      action: 'PUBLIC_SIGNATURE_SUBMITTED',
+      action:      'PUBLIC_SIGNATURE_SUBMITTED',
       details: {
         signature_id: sig.id,
-        signer_name: sig.signer_name,
-        all_signed: allSigned,
-        pdf_emailed: !!signedPdfUrl,
+        signer_name:  sig.signer_name,
+        all_signed:   allSigned,
+        pdf_emailed:  !!signedPdfUrl,
       },
       ip_address: req.ip,
       user_agent: req.get('user-agent'),
     }]);
 
     res.json({
-      success: true,
-      message: 'Document signed successfully',
+      success:     true,
+      message:     'Document signed successfully',
       signer_name: sig.signer_name,
-      pdf_ready: allSigned,
+      pdf_ready:   allSigned,
     });
 
   } catch (err) {
@@ -459,10 +407,6 @@ const submitPublicSignature = async (req, res) => {
   }
 };
 
-/**
- * POST /api/signatures/public/:token/reject
- * NO auth required
- */
 const submitPublicRejection = async (req, res) => {
   try {
     const { token }            = req.params;
@@ -527,10 +471,7 @@ const submitPublicRejection = async (req, res) => {
     const docTitle   = doc.title || doc.file_name || 'Document';
 
     if (ownerEmail) {
-      const transporter = getTransporter();
-
-      await transporter.sendMail({
-        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
+      await sendEmail({
         to:      ownerEmail,
         subject: `Signature Rejected: ${docTitle}`,
         text: [

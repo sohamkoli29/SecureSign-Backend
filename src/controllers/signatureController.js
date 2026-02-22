@@ -1,39 +1,30 @@
-const supabase       = require('../utils/supabase');
-const supabaseAdmin  = require('../utils/supabaseAdmin');
-const nodemailer     = require('nodemailer');
+const supabase      = require('../utils/supabase');
+const supabaseAdmin = require('../utils/supabaseAdmin');
+const { Resend }    = require('resend');
 
-/* ── Email helper (same as publicSignController) ───────────────── */
-const getTransporter = () => {
-  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
+const sendEmail = async ({ to, subject, text, html }) => {
+  if (!process.env.RESEND_API_KEY) {
+    console.log('\n📧 ── MOCK EMAIL ──────────────────────────────');
+    console.log(`  To:      ${to}`);
+    console.log(`  Subject: ${subject}`);
+    console.log('─────────────────────────────────────────────\n');
+    return;
   }
-  return {
-    sendMail: async (opts) => {
-      console.log('\n📧 ── MOCK EMAIL ──────────────────────────────');
-      console.log(`  To:      ${opts.to}`);
-      console.log(`  Subject: ${opts.subject}`);
-      console.log('─────────────────────────────────────────────\n');
-      return { messageId: 'mock-' + Date.now() };
-    },
-  };
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  await resend.emails.send({
+    from: process.env.FROM_EMAIL || 'SecureSign <onboarding@resend.dev>',
+    to,
+    subject,
+    text,
+    html,
+  });
 };
 
-/**
- * POST /api/signatures
- * Create a new signature placeholder
- */
 const createSignature = async (req, res) => {
   try {
     const { document_id, signer_name, coordinates, page_number, signature_data, status } = req.body;
     const userId = req.user.id;
 
-    // Verify document ownership
     const { data: doc, error: docErr } = await supabase
       .from('documents')
       .select('id, user_id')
@@ -69,10 +60,6 @@ const createSignature = async (req, res) => {
   }
 };
 
-/**
- * GET /api/signatures/document/:documentId
- * Get all signatures for a document
- */
 const getDocumentSignatures = async (req, res) => {
   try {
     const { documentId } = req.params;
@@ -106,10 +93,6 @@ const getDocumentSignatures = async (req, res) => {
   }
 };
 
-/**
- * PUT /api/signatures/:id/position
- * Update signature position
- */
 const updateSignaturePosition = async (req, res) => {
   try {
     const { id }                       = req.params;
@@ -155,16 +138,11 @@ const updateSignaturePosition = async (req, res) => {
   }
 };
 
-/**
- * PATCH /api/signatures/:id/status
- * Update signature status (signed, rejected, etc.)
- * If rejected + notify_signer flag, sends email to signer with rejection reason
- */
 const updateSignatureStatus = async (req, res) => {
   try {
-    const { id }       = req.params;
+    const { id } = req.params;
     const { status, signature_data, rejection_reason, notify_signer } = req.body;
-    const userId       = req.user.id;
+    const userId = req.user.id;
 
     const { data: sig, error: sigErr } = await supabaseAdmin
       .from('signatures')
@@ -209,13 +187,10 @@ const updateSignatureStatus = async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to update signature' });
     }
 
-    /* ── Send rejection email if requested ──────────────────────── */
     if (status === 'rejected' && notify_signer && sig.signer_email) {
-      const transporter = getTransporter();
       const docTitle = doc.title || doc.file_name || 'Document';
 
-      await transporter.sendMail({
-        from:    process.env.GMAIL_USER || 'noreply@SecureSign.app',
+      await sendEmail({
         to:      sig.signer_email,
         subject: `Signature Rejected: ${docTitle}`,
         text: [
@@ -256,16 +231,15 @@ const updateSignatureStatus = async (req, res) => {
       console.log(`✅ Rejection email sent to ${sig.signer_email}`);
     }
 
-    /* ── Audit log ───────────────────────────────────────────────── */
     await supabaseAdmin.from('audit_logs').insert([{
       user_id:     userId,
       document_id: sig.document_id,
       action:      status === 'rejected' ? 'SIGNATURE_REJECTED' : 'SIGNATURE_SIGNED',
       details: {
-        signature_id: id,
-        signer_name:  sig.signer_name,
+        signature_id:     id,
+        signer_name:      sig.signer_name,
         rejection_reason: status === 'rejected' ? rejection_reason : null,
-        email_sent:   status === 'rejected' && notify_signer && sig.signer_email ? true : false,
+        email_sent:       status === 'rejected' && notify_signer && sig.signer_email ? true : false,
       },
       ip_address: req.ip,
       user_agent: req.get('user-agent'),
@@ -278,9 +252,6 @@ const updateSignatureStatus = async (req, res) => {
   }
 };
 
-/**
- * DELETE /api/signatures/:id
- */
 const deleteSignature = async (req, res) => {
   try {
     const { id } = req.params;
