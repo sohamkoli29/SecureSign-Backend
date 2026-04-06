@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
-
+const supabase = require('./utils/supabase');
 // Load environment variables
 dotenv.config();
 
@@ -37,12 +37,13 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/signatures', signatureRoutes); // Add this
 app.use('/api/audit', auditRoutes);
 // Basic route for testing
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Document Signature API is running',
-    timestamp: new Date().toISOString()
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    await supabase.from('test').select('message').limit(1).single();
+    res.status(200).json({ alive: true, db: 'connected' });
+  } catch (err) {
+    res.status(200).json({ alive: true, db: 'error' });
+  }
 });
 
 // Error handling middleware
